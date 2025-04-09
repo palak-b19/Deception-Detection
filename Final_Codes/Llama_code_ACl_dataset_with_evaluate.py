@@ -1,6 +1,7 @@
 import os
 import jsonlines
 from openai import OpenAI
+from sklearn.metrics import f1_score, classification_report, accuracy_score
 
 # Set your Groq API key as an environment variable
 os.environ["GROQ_API_KEY"] = "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"
@@ -91,8 +92,7 @@ def refine_prediction(client, initial_prediction, initial_rationale, feedback):
     return revised_prediction, revised_rationale
 
 def process_dialogue(client, dialogue_data, max_messages=None):
-    """Process a single dialogue from the dataset."""
-    print(dialogue_data)
+    """Process a single dialogue from the dataset and collect predictions/labels."""
     speakers = dialogue_data["speakers"]
     receivers = dialogue_data["receivers"]
     messages = dialogue_data["messages"]
@@ -104,6 +104,10 @@ def process_dialogue(client, dialogue_data, max_messages=None):
 
     num_messages = min(len(messages), max_messages) if max_messages else len(messages)
     
+    # Initialize lists to collect predictions and labels
+    revised_predictions = []
+    actual_labels = []
+
     for i in range(num_messages):
         # Dialogue is all previous messages (empty if first message)
         dialogue = "\n".join([f"{speakers[j]} to {receivers[j]}: {messages[j]}" for j in range(i)]) if i > 0 else ""
@@ -127,21 +131,73 @@ def process_dialogue(client, dialogue_data, max_messages=None):
         else:
             label = "unknown"
 
-        # Print results
+        # Collect predictions and labels
+        revised_predictions.append(revised_prediction)
+        actual_labels.append(label)
+
+        # Print results (optional, kept for debugging)
         print(f"\nMessage {i} in dialogue:")
         print(f"Game State: {game_state}")
         print(f"Dialogue: {dialogue}")
         print(f"Statement: {statement}")
+        print('*'*50)
+        print(" Predictions ")
+        print(f"Initial Prediction: {initial_prediction}")
+        print(f"Initial Rationale: {initial_rationale}")
+        print(f"Feedback: {feedback}")
         print(f"Revised Prediction: {revised_prediction}")
         print(f"Actual Label: {label}")
         print(f"Revised Rationale: {revised_rationale}")
+        print('*'*50)
+
+    return revised_predictions, actual_labels
+
+def evaluate(all_revised_predictions, all_actual_labels):
+    # Define the label mapping
+    label_map = {'truth': 0, 'lie': 1}
+    
+    # Filter out invalid entries ('unknown')
+    valid_pairs = [(pred, label) for pred, label in zip(all_revised_predictions, all_actual_labels)
+                   if pred in label_map and label in label_map]
+    
+    if not valid_pairs:
+        print("No valid predictions/labels to evaluate.")
+        return
+    
+    # Map strings to numerical values
+    all_predictions_num = [label_map[pred] for pred, _ in valid_pairs]
+    all_labels_num = [label_map[label] for _, label in valid_pairs]
+    
+    # Compute metrics
+    lie_f1 = f1_score(all_labels_num, all_predictions_num, pos_label=1)
+    truth_f1 = f1_score(all_labels_num, all_predictions_num, pos_label=0)
+    macro_f1 = f1_score(all_labels_num, all_predictions_num, average='macro')
+    micro_f1 = accuracy_score(all_labels_num, all_predictions_num)  # Micro F1 = accuracy in binary case
+    
+    # Print results
+    print("\nPerformance Metrics:")
+    print(f"Lie F1: {lie_f1:.4f}")
+    print(f"Truth F1: {truth_f1:.4f}")
+    print(f"Macro F1: {macro_f1:.4f}")
+    print(f"Micro F1 (Accuracy): {micro_f1:.4f}")
+    print("\nDetailed Classification Report:")
+    print(classification_report(all_labels_num, all_predictions_num, target_names=['truth', 'lie']))
 
 if __name__ == "__main__":
     # Load the dataset (e.g., train.jsonl)
-    dataset_path = "train.jsonl"  # Adjust path as needed
+    dataset_path = "val.jsonl"  # Adjust path as needed
     with jsonlines.open(dataset_path) as reader:
-        # Process only the first dialogue for testing (remove break to process all)
+        # Collect predictions and labels from all dialogues
+        all_revised_predictions = []
+        all_actual_labels = []
+
         for obj in reader:
             dialogue_data = obj
-            process_dialogue(client, dialogue_data, max_messages=3)  # Limit to 3 messages for testing
+            preds, labels = process_dialogue(client, dialogue_data, max_messages=3)  # Limit to 3 messages for testing
+            all_revised_predictions.extend(preds)
+            all_actual_labels.extend(labels)
+            # Remove break to process all dialogues; kept for testing
             break
+        evaluate(all_revised_predictions,all_actual_labels)
+
+       
