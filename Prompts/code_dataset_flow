@@ -1,0 +1,82 @@
+Dataset Implementation in "It Takes Two to Lie"
+Based on the paper excerpt and configuration files, I can explain how the dataset is implemented and used in the models:
+Dataset Format
+The paper uses the JSONL format of the Diplomacy dataset, where each line contains a game dialogue with detailed metadata. The dataset files used are:
+
+train.jsonl
+validation.jsonl
+test.jsonl
+
+Key Fields in the Dataset
+From the configuration files, we can see the model primarily accesses:
+
+Messages: The raw text content of each message
+Labels:
+
+sender_labels: Whether the sender intended the message as truthful or deceptive
+receiver_labels: Whether the receiver perceived the message as truthful or deceptive
+
+
+Game Context:
+
+game_score: Supply centers controlled by the sender
+score_delta: Difference in supply centers between sender and receiver
+
+
+Message Context:
+
+relative_message_index: Position of message in current dialogue
+absolute_message_index: Position of message in entire game
+
+
+
+How the Model Processes the Data
+The hierarchical LSTM model processes the data in two key ways:
+
+Message Level Processing:
+
+Each message is tokenized (either using BERT tokenizer or standard tokenization)
+The message text is encoded using either BERT pooler or an LSTM
+This captures the content of individual messages
+
+
+Conversation Level Processing:
+
+Previous messages are encoded as context
+A forward LSTM runs over all messages in sequence
+This captures the conversational flow and history
+
+
+Power Dynamics (when enabled):
+
+The model incorporates game_score and score_delta
+This adds information about the relative power positions of players
+
+
+
+Label Usage
+The model targets two different prediction tasks:
+
+ACTUAL_LIE task:
+
+Uses sender_labels as ground truth
+Predicts whether the sender actually intended to deceive
+
+
+SUSPECTED_LIE task:
+
+Uses receiver_labels as ground truth
+Predicts whether the receiver perceived the message as deceptive
+
+
+
+Implementation Details
+The diplomacy_reader class (referenced in the configs) handles:
+
+Reading the JSONL files
+Extracting the appropriate labels based on the task
+Tokenizing the text content
+Preparing the conversational context
+Incorporating game scores when use_game_scores is true
+
+The hierarchical structure allows the model to consider both the content of individual messages and the broader context of the conversation, mimicking how humans would evaluate the truthfulness of statements in an ongoing dialogue.
