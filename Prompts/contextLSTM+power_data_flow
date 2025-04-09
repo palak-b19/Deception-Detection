@@ -1,0 +1,65 @@
+# Understanding LSTM+Power+Context in the "It Takes Two to Lie" Model
+
+The LSTM+Power+Context model in the paper is a sophisticated approach to deception detection that incorporates three key components. Let me break down how this specific model works:
+
+## 1. Hierarchical LSTM Architecture
+
+The hierarchical LSTM model has two levels:
+
+### Message-Level Encoding
+- Each individual message is first encoded separately
+- In the best-performing model (Context LSTM+Power+BERT), BERT is used to convert the message text into a vector representation (768 dimensions)
+- This captures the semantic content of each individual message
+
+### Conversation-Level Encoding
+- A forward LSTM with hidden size 200 processes the messages sequentially
+- For each message, the model has access to representations of all previous messages
+- This creates a "memory" of the conversation history
+- The LSTM maintains and updates this conversational state as it processes each message
+
+## 2. Power Dynamics Integration
+
+The "Power" component refers to incorporating the game state information:
+
+- `game_score`: The current count of supply centers controlled by the message sender
+- `score_delta`: The difference between sender's and receiver's supply centers
+
+This is implemented in the configuration with:
+```json
+"use_game_scores": true
+```
+
+This power information is crucial because:
+- It provides context about the relative positions of players
+- Players with more power (more supply centers) might have different deception patterns
+- The power imbalance between players might influence deception strategies
+
+## 3. Context Utilization
+
+The "Context" component refers to how previous messages influence the model's decisions:
+
+- Each message is analyzed in sequence using the conversational LSTM
+- When making a prediction about a message, the model has access to:
+  - The encoded representation of the current message
+  - The hidden state of the LSTM containing information about all previous messages
+  - The power dynamics at that point in the game
+
+This mimics how humans detect deception - by considering:
+- What was said before
+- Current power dynamics
+- The content of the current message
+
+## Data Flow in LSTM+Power+Context
+
+1. The `diplomacy_reader` reads a message from the JSONL file
+2. Previous messages in the conversation are collected for context
+3. Game scores at that point in time are extracted
+4. Each message is encoded (using BERT in the best model)
+5. The conversation-level LSTM processes messages sequentially
+6. For each message, the model combines:
+   - The message representation
+   - The conversation state from the LSTM
+   - The power dynamics features
+7. The combined representation is used to classify the message as truthful or deceptive
+
+This combined approach that integrates message content, conversational history, and power dynamics is what allows the model to achieve performance close to human detection levels for the ACTUAL_LIE task (detecting sender's intended deception).
