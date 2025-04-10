@@ -17,7 +17,7 @@ pip uninstall overrides -y
 pip install overrides==3.1.0
 ```
 
-### 3. Train using AllenNLP  
+### 3. Train using CPU ( GPU Resource Constraints )
 ```bash
 allennlp train -f --include-package diplomacy -s logdir --overrides '{"trainer": {"cuda_device": -1}}' configs/actual_lie/contextlstm+power.jsonnet
 ```
