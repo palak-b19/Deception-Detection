@@ -1,6 +1,6 @@
 
 
-```markdown
+```
 ## Possible Error Fixes Required While Running the Baseline Code
 
 If you encounter issues while running the baseline code, try the following fixes:
