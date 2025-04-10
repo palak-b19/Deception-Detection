@@ -1,0 +1,33 @@
+Conversation Sequence: [Message1, Message2, ..., MessageN]
+For each Message i: {text_i, sender_i, receiver_i, sender_label_i, receiver_label_i}
+
+1. Preprocessing:
+   - text_i → Message Embedding (e.g., via word embeddings or BERT)
+   - sender_i → Sender Embedding (e.g., one-hot or learned embedding for the country)
+   - receiver_i → Receiver Embedding (e.g., one-hot or learned embedding for the country)
+
+2. Sender LSTM:
+   - Input at step i: [Message Embedding_i, Sender Embedding_i]
+   - Output: Hidden State h_sender_i
+   - Prediction: sender_pred_i (probability of sender_label_i)
+
+3. Receiver LSTM:
+   - Input at step i: [Message Embedding_i, Receiver Embedding_i]
+   - Output: Hidden State h_receiver_i
+   - Prediction: receiver_pred_i (probability of receiver_label_i, if annotated)
+
+4. Interaction Layer:
+   - Combine: h_combined_i = concatenate(h_sender_i, h_receiver_i)
+   - Classifier: h_combined_i → Final Prediction (probability of sender_label_i)
+
+5. Training:
+   - Loss_Sender = CrossEntropy(sender_pred_i, sender_label_i)
+   - Loss_Receiver = CrossEntropy(receiver_pred_i, receiver_label_i) [if available, else masked]
+   - Loss_Combined = CrossEntropy(final_prediction_i, sender_label_i)
+   - Total Loss = w1 * Loss_Sender + w2 * Loss_Receiver + w3 * Loss_Combined
+   - Optimize model parameters
+
+6. For Each Conversation:
+   - Reset LSTM hidden states
+   - Process sequence independently
+   - Repeat for next pair (e.g., Austria-Italy → England-France)
