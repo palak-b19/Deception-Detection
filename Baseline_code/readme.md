@@ -1,4 +1,4 @@
-You can format this for a `README.md` file using Markdown syntax for clarity. Here's a well-structured version:  
+
 
 ```markdown
 ## Possible Error Fixes Required While Running the Baseline Code
@@ -27,5 +27,3 @@ allennlp train -f --include-package diplomacy -s logdir --overrides '{"trainer":
 pip install pandas seaborn wordcloud
 ```
 
-Make sure you have the correct versions installed to avoid compatibility issues.
-```
