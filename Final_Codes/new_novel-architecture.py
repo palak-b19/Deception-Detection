@@ -11,22 +11,31 @@ print("starting")
 
 # Dataset class to handle Diplomacy game data
 class DiplomacyDataset(Dataset):
-    def __init__(self, file_path, tokenizer, max_length=128):
+    def __init__(self, file_path, tokenizer, max_length=128, device='cpu'):
         self.data = []
         print(f"Loading dataset from {file_path}...")
         with jsonlines.open(file_path, 'r') as reader:
             dialogs_list = list(reader)  # Convert iterator to list for tqdm
             for dialogs in tqdm(dialogs_list, desc="Processing dialogs"):
-                # Iterate over messages and their corresponding features
-                for msg, sender_label, game_score, game_score_delta in zip(
-                    dialogs['messages'], dialogs['sender_labels'], dialogs['game_score'], dialogs['game_score_delta']
+                # Create list of tuples for messages and features to use with tqdm
+                message_data = list(zip(
+                    dialogs['messages'], 
+                    dialogs['sender_labels'], 
+                    dialogs['game_score'], 
+                    dialogs['game_score_delta']
+                ))
+                # Iterate over messages with tqdm
+                for msg, sender_label, game_score, game_score_delta in tqdm(
+                    message_data, 
+                    desc="Processing messages", 
+                    leave=False
                 ):
                     # Construct game_state as a list of floats
                     try:
                         game_state = [float(game_score), float(game_score_delta)]
                     except (ValueError, TypeError):
-                        # Skip or set default values if conversion fails
-                        continue  # or game_state = [0.0, 0.0]
+                        # Skip if conversion fails
+                        continue
 
                     # Convert sender_label to binary label (0 for truthful, 1 for deceptive)
                     if sender_label is True:
@@ -43,6 +52,7 @@ class DiplomacyDataset(Dataset):
                     })
         self.tokenizer = tokenizer
         self.max_length = max_length
+        self.device = device
 
     def __len__(self):
         return len(self.data)
@@ -51,8 +61,9 @@ class DiplomacyDataset(Dataset):
         item = self.data[idx]
         text = item['text']
         label = item['label']
-        game_state = torch.tensor(item['game_state'], dtype=torch.float32)
+        game_state = item['game_state']
         
+        # Tokenize and move tensors to device
         encoding = self.tokenizer(
             text,
             max_length=self.max_length,
@@ -60,12 +71,18 @@ class DiplomacyDataset(Dataset):
             truncation=True,
             return_tensors='pt'
         )
+        input_ids = encoding['input_ids'].squeeze(0).to(self.device)
+        attention_mask = encoding['attention_mask'].squeeze(0).to(self.device)
+        
+        # Create tensors directly on device
+        game_state = torch.tensor(game_state, dtype=torch.float32, device=self.device)
+        label = torch.tensor(label, dtype=torch.float32, device=self.device)
         
         return {
-            'input_ids': encoding['input_ids'].squeeze(0),
-            'attention_mask': encoding['attention_mask'].squeeze(0),
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
             'game_state': game_state,
-            'label': torch.tensor(label, dtype=torch.float32)
+            'label': label
         }
 
 # Model architecture
@@ -122,10 +139,10 @@ def train(model, dataloader, optimizer, criterion, device):
     total_loss = 0
     # Add tqdm progress bar for training batches
     for batch in tqdm(dataloader, desc="Training batches"):
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        game_state = batch['game_state'].to(device)
-        labels = batch['label'].to(device)
+        input_ids = batch['input_ids']  # Already on device
+        attention_mask = batch['attention_mask']  # Already on device
+        game_state = batch['game_state']  # Already on device
+        labels = batch['label']  # Already on device
 
         optimizer.zero_grad()
         outputs = model(input_ids, attention_mask, game_state)
@@ -142,12 +159,13 @@ def evaluate(model, dataloader, device):
     with torch.no_grad():
         # Add tqdm progress bar for evaluation batches
         for batch in tqdm(dataloader, desc="Evaluation batches"):
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            game_state = batch['game_state'].to(device)
-            label = batch['label'].to(device)
+            input_ids = batch['input_ids']  # Already on device
+            attention_mask = batch['attention_mask']  # Already on device
+            game_state = batch['game_state']  # Already on device
+            label = batch['label']  # Already on device
 
             outputs = model(input_ids, attention_mask, game_state)
+            # Move outputs to CPU for numpy conversion
             preds.extend(outputs.squeeze(1).cpu().numpy())
             labels.extend(label.cpu().numpy())
     preds = np.array(preds) > 0.5  # Threshold at 0.5
@@ -164,23 +182,37 @@ def main():
     num_epochs = 10
     learning_rate = 2e-5
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
     # Load tokenizer and RoBERTa model
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-    roberta_model = RobertaModel.from_pretrained('roberta-base')
+    roberta_model = RobertaModel.from_pretrained('roberta-base').to(device)  # Move to device
 
-    # Game state dimension is 2 (game_score, score_delta)
+    # Game state dimension is 2 (game_score, game_score_delta)
     game_state_dim = 2
-    model = DeceptionDetectionModel(roberta_model, game_state_dim).to(device)
+    model = DeceptionDetectionModel(roberta_model, game_state_dim).to(device)  # Ensure model is on device
 
-    # Load datasets (replace with your file paths)
-    train_dataset = DiplomacyDataset('train.jsonl', tokenizer)
-    val_dataset = DiplomacyDataset('validation.jsonl', tokenizer)
-    test_dataset = DiplomacyDataset('test.jsonl', tokenizer)
+    # Load datasets
+    train_dataset = DiplomacyDataset('/kaggle/input/dataset-deception/train.jsonl', tokenizer, device=device)
+    val_dataset = DiplomacyDataset('/kaggle/input/dataset-deception/validation.jsonl', tokenizer,device=device)
+    test_dataset = DiplomacyDataset('/kaggle/input/dataset-deception/test.jsonl', tokenizer, device=device)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        pin_memory=False  # Disable pin_memory since tensors are on GPU
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size, 
+        pin_memory=False  # Disable pin_memory since tensors are on GPU
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        pin_memory=False  # Disable pin_memory since tensors are on GPU
+    )
 
     # Optimizer and loss function
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
