@@ -1,58 +1,69 @@
 import torch
 import torch.nn as nn
 from transformers import RobertaTokenizer, RobertaModel
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 import jsonlines
 import numpy as np
 from sklearn.metrics import f1_score, accuracy_score
-from tqdm import tqdm  # Import tqdm for progress bars
+from tqdm.notebook import tqdm
+import collections
 
-print("starting")
+print("Starting")
 
-# Dataset class to handle Diplomacy game data
+# Dataset class with conversational context
 class DiplomacyDataset(Dataset):
-    def __init__(self, file_path, tokenizer, max_length=128, device='cpu'):
+    def __init__(self, file_path, tokenizer, max_length=128, context_size=3, device='cpu'):
         self.data = []
+        self.context_size = context_size  # Number of previous messages to include
         print(f"Loading dataset from {file_path}...")
         with jsonlines.open(file_path, 'r') as reader:
-            dialogs_list = list(reader)  # Convert iterator to list for tqdm
-            for dialogs in tqdm(dialogs_list, desc="Processing dialogs"):
-                # Create list of tuples for messages and features to use with tqdm
-                message_data = list(zip(
-                    dialogs['messages'], 
-                    dialogs['sender_labels'], 
-                    dialogs['game_score'], 
-                    dialogs['game_score_delta']
-                ))
-                # Iterate over messages with tqdm
-                for msg, sender_label, game_score, game_score_delta in tqdm(
-                    message_data, 
-                    desc="Processing messages", 
-                    leave=False
-                ):
-                    # Construct game_state as a list of floats
+            dialogs_list = list(reader)
+            total_messages = sum(len(dialogs['messages']) for dialogs in dialogs_list)
+            
+            for dialogs in tqdm(dialogs_list, desc="Processing dialogs", position=0):
+                messages = dialogs['messages']
+                sender_labels = dialogs['sender_labels']
+                game_scores = dialogs['game_score']
+                score_deltas = dialogs['game_score_delta']
+                
+                # Create context windows
+                for i in range(len(messages)):
+                    # Get current message and up to context_size previous messages
+                    context_messages = []
+                    for j in range(max(0, i - self.context_size), i + 1):
+                        context_messages.append(messages[j])
+                    # Join context messages with a separator
+                    text = " [SEP] ".join(context_messages)
+                    
+                    # Get label and game state for current message
                     try:
-                        game_state = [float(game_score), float(game_score_delta)]
+                        game_state = [float(game_scores[i]), float(score_deltas[i])]
                     except (ValueError, TypeError):
-                        # Skip if conversion fails
                         continue
-
-                    # Convert sender_label to binary label (0 for truthful, 1 for deceptive)
-                    if sender_label is True:
+                    
+                    if sender_labels[i] is True:
                         label = 0  # Truthful
-                    elif sender_label is False:
+                    elif sender_labels[i] is False:
                         label = 1  # Deceptive
                     else:
-                        continue  # Skip if label is None or invalid
-
+                        continue
+                    
                     self.data.append({
-                        'text': msg,
+                        'text': text,
                         'label': label,
                         'game_state': game_state
                     })
+
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.device = device
+
+        # Compute class weights for sampler
+        labels = [item['label'] for item in self.data]
+        class_counts = collections.Counter(labels)
+        total = len(labels)
+        weights = [total / (len(class_counts) * class_counts[label]) for label in labels]
+        self.weights = torch.tensor(weights, dtype=torch.float32)
 
     def __len__(self):
         return len(self.data)
@@ -63,7 +74,6 @@ class DiplomacyDataset(Dataset):
         label = item['label']
         game_state = item['game_state']
         
-        # Tokenize and move tensors to device
         encoding = self.tokenizer(
             text,
             max_length=self.max_length,
@@ -73,8 +83,6 @@ class DiplomacyDataset(Dataset):
         )
         input_ids = encoding['input_ids'].squeeze(0).to(self.device)
         attention_mask = encoding['attention_mask'].squeeze(0).to(self.device)
-        
-        # Create tensors directly on device
         game_state = torch.tensor(game_state, dtype=torch.float32, device=self.device)
         label = torch.tensor(label, dtype=torch.float32, device=self.device)
         
@@ -85,43 +93,34 @@ class DiplomacyDataset(Dataset):
             'label': label
         }
 
-# Model architecture
+# Model architecture (unchanged)
 class DeceptionDetectionModel(nn.Module):
     def __init__(self, roberta_model, game_state_dim, hidden_dim=800, dropout=0.3):
         super(DeceptionDetectionModel, self).__init__()
         self.roberta = roberta_model
-        # Encode game-state features with a 2-layer MLP
         self.game_state_encoder = nn.Sequential(
             nn.Linear(game_state_dim, 64),
             nn.ReLU(),
             nn.Linear(64, 32),
             nn.ReLU()
         )
-        # Transformer encoder layer for fusion
         self.fusion_transformer = nn.TransformerEncoderLayer(d_model=768 + 32, nhead=4, dim_feedforward=2048)
-        self.classifier = nn.Linear(768 + 32, 1)  # Output a single logit
+        self.classifier = nn.Linear(768 + 32, 1)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, input_ids, attention_mask, game_state):
-        # Text encoding using RoBERTa
-        text_embeds = self.roberta(input_ids=input_ids, attention_mask=attention_mask).pooler_output  # (batch_size, 768)
-
-        # Game-state encoding
-        game_embeds = self.game_state_encoder(game_state)  # (batch_size, 32)
-
-        # Fusion of text and game-state features
-        fused = torch.cat((text_embeds, game_embeds), dim=1)  # (batch_size, 800)
-        fused = self.fusion_transformer(fused.unsqueeze(0)).squeeze(0)  # (batch_size, 800)
+        text_embeds = self.roberta(input_ids=input_ids, attention_mask=attention_mask).pooler_output
+        game_embeds = self.game_state_encoder(game_state)
+        fused = torch.cat((text_embeds, game_embeds), dim=1)
+        fused = self.fusion_transformer(fused.unsqueeze(0)).squeeze(0)
         fused = self.dropout(fused)
-
-        # Classification
-        logits = self.classifier(fused)  # (batch_size, 1)
-        probs = torch.sigmoid(logits)    # Probability of deception
+        logits = self.classifier(fused)
+        probs = torch.sigmoid(logits)
         return probs
 
-# Focal loss to handle class imbalance
+# Focal loss with adjusted alpha
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=2, alpha=0.25):
+    def __init__(self, gamma=2, alpha=0.75):
         super(FocalLoss, self).__init__()
         self.gamma = gamma
         self.alpha = alpha
@@ -137,12 +136,11 @@ class FocalLoss(nn.Module):
 def train(model, dataloader, optimizer, criterion, device):
     model.train()
     total_loss = 0
-    # Add tqdm progress bar for training batches
-    for batch in tqdm(dataloader, desc="Training batches"):
-        input_ids = batch['input_ids']  # Already on device
-        attention_mask = batch['attention_mask']  # Already on device
-        game_state = batch['game_state']  # Already on device
-        labels = batch['label']  # Already on device
+    for batch in tqdm(dataloader, desc="Training batches", position=1, leave=True):
+        input_ids = batch['input_ids']
+        attention_mask = batch['attention_mask']
+        game_state = batch['game_state']
+        labels = batch['label']
 
         optimizer.zero_grad()
         outputs = model(input_ids, attention_mask, game_state)
@@ -157,74 +155,71 @@ def evaluate(model, dataloader, device):
     model.eval()
     preds, labels = [], []
     with torch.no_grad():
-        # Add tqdm progress bar for evaluation batches
-        for batch in tqdm(dataloader, desc="Evaluation batches"):
-            input_ids = batch['input_ids']  # Already on device
-            attention_mask = batch['attention_mask']  # Already on device
-            game_state = batch['game_state']  # Already on device
-            label = batch['label']  # Already on device
+        for batch in tqdm(dataloader, desc="Evaluation batches", position=1, leave=True):
+            input_ids = batch['input_ids']
+            attention_mask = batch['attention_mask']
+            game_state = batch['game_state']
+            label = batch['label']
 
             outputs = model(input_ids, attention_mask, game_state)
-            # Move outputs to CPU for numpy conversion
             preds.extend(outputs.squeeze(1).cpu().numpy())
             labels.extend(label.cpu().numpy())
-    preds = np.array(preds) > 0.5  # Threshold at 0.5
+    preds = np.array(preds) > 0.5
     labels = np.array(labels)
     macro_f1 = f1_score(labels, preds, average='macro')
     lie_f1 = f1_score(labels, preds, pos_label=1)
     accuracy = accuracy_score(labels, preds)
     return macro_f1, lie_f1, accuracy
 
-# Main function to run the training and evaluation
+# Main function
 def main():
     # Hyperparameters
-    batch_size = 32
-    num_epochs = 10
+    batch_size = 16  # Reduced from 32
+    num_epochs = 15  # Increased to match paper
     learning_rate = 2e-5
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # Load tokenizer and RoBERTa model
+    # Load tokenizer and model
     tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
-    roberta_model = RobertaModel.from_pretrained('roberta-base').to(device)  # Move to device
-
-    # Game state dimension is 2 (game_score, game_score_delta)
-    game_state_dim = 2
-    model = DeceptionDetectionModel(roberta_model, game_state_dim).to(device)  # Ensure model is on device
+    roberta_model = RobertaModel.from_pretrained('roberta-base').to(device)
+    game_state_dim = 2  # game_score, score_delta
+    model = DeceptionDetectionModel(roberta_model, game_state_dim).to(device)
 
     # Load datasets
     train_dataset = DiplomacyDataset('/kaggle/input/dataset-deception/train.jsonl', tokenizer, device=device)
-    val_dataset = DiplomacyDataset('/kaggle/input/dataset-deception/validation.jsonl', tokenizer,device=device)
+    val_dataset = DiplomacyDataset('/kaggle/input/dataset-deception/validation.jsonl', tokenizer, device=device)
     test_dataset = DiplomacyDataset('/kaggle/input/dataset-deception/test.jsonl', tokenizer, device=device)
 
+    # Weighted sampler for class imbalance
     train_loader = DataLoader(
-        train_dataset, 
-        batch_size=batch_size, 
-        shuffle=True, 
-        pin_memory=False  # Disable pin_memory since tensors are on GPU
+        train_dataset,
+        batch_size=batch_size,
+        sampler=WeightedRandomSampler(train_dataset.weights, len(train_dataset)),
+        pin_memory=False
     )
     val_loader = DataLoader(
-        val_dataset, 
-        batch_size=batch_size, 
-        pin_memory=False  # Disable pin_memory since tensors are on GPU
+        val_dataset,
+        batch_size=batch_size,
+        pin_memory=False
     )
     test_loader = DataLoader(
-        test_dataset, 
-        batch_size=batch_size, 
-        pin_memory=False  # Disable pin_memory since tensors are on GPU
+        test_dataset,
+        batch_size=batch_size,
+        pin_memory=False
     )
 
     # Optimizer and loss function
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     criterion = FocalLoss()
 
-    # Training loop with tqdm for epochs
-    for epoch in tqdm(range(num_epochs), desc="Epochs"):
+    # Training loop
+    for epoch in tqdm(range(num_epochs), desc="Epochs", position=0):
         train_loss = train(model, train_loader, optimizer, criterion, device)
         macro_f1, lie_f1, accuracy = evaluate(model, val_loader, device)
         print(f'Epoch {epoch+1}/{num_epochs}, Loss: {train_loss:.4f}, Macro F1: {macro_f1:.4f}, Lie F1: {lie_f1:.4f}, Accuracy: {accuracy:.4f}')
 
-    # Test evaluation with tqdm
+    # Test evaluation
     print("Running final test evaluation...")
     macro_f1, lie_f1, accuracy = evaluate(model, test_loader, device)
     print(f'Test Macro F1: {macro_f1:.4f}, Lie F1: {lie_f1:.4f}, Accuracy: {accuracy:.4f}')
