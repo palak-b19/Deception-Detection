@@ -1,0 +1,238 @@
+This configuration file (`contextlstm+power.jsonnet`) defines the setup for training and evaluating a **hierarchical LSTM-based** model on a dataset of **diplomatic messages**. The dataset likely involves detecting **lies or deceptive communication** (hence the filename `actual_lie`). Below is a **detailed explanation** of each part of the file and what it does.
+
+---
+
+## 🔍 What is the purpose of this configuration?
+
+The config is meant for a **text classification task** where the goal is to **detect deceptive messages (lies)** in diplomatic conversations (probably from a game like **Diplomacy**, which involves negotiation and betrayal). The `actual_lie` part refers to the task of predicting **whether a message is a lie or not** based on its context.
+
+---
+
+## 🧠 Breakdown of the Configuration
+
+### 🎲 Random Seed Settings
+```json
+"pytorch_seed": 1994,
+"numpy_seed": 1994,
+"random_seed": 1994,
+```
+- Ensures **reproducibility** by fixing seeds for PyTorch, NumPy, and Python’s `random`.
+
+---
+
+### 📚 Dataset Reader
+```json
+"dataset_reader": {
+    "type": "diplomacy_reader",
+    "label_key": "sender_labels",
+    ...
+}
+```
+- Custom reader (`diplomacy_reader`) for processing data related to the game **Diplomacy**.
+- `label_key: sender_labels` → The model will predict labels attached to **message senders**, likely whether they are lying or telling the truth.
+- `token_indexers`: Uses basic token indexing (lowercased words).
+- `use_game_scores: true`: Game-related numerical features (like power positions or scores) are incorporated during training.
+
+---
+
+### 🔁 Iterator
+```json
+"iterator": {
+    "type": "basic",
+    "batch_size": 4
+}
+```
+- Defines how training batches are created.
+- `batch_size: 4` → Small batches, possibly due to GPU memory constraints.
+
+---
+
+### 🏗️ Model
+```json
+"type": "hierarchical_lstm",
+```
+- The model is a **Hierarchical LSTM**, which processes conversation in two layers:
+  1. **Message level** (individual messages)
+  2. **Conversation level** (series of messages)
+
+#### 🧠 Embedder
+```json
+"embedder": {
+    "tokens": {
+        "type": "embedding",
+        "embedding_dim": 200,
+        "pretrained_file": "...glove.twitter.27B.200d.txt",
+        "trainable": false
+    }
+}
+```
+- Loads **pretrained GloVe embeddings** (200d) trained on Twitter data.
+- Embeddings are **frozen** (not updated during training).
+
+#### ✉️ Message Encoder
+```json
+"message_encoder": {
+    "type": "pooled_rnn",
+    "encoder": {
+        "type": "lstm",
+        "bidirectional": true,
+        ...
+    },
+    "poolers": "max"
+}
+```
+- Encodes individual messages using a **bidirectional LSTM**.
+- Then applies **max pooling** across hidden states to get a fixed-size vector per message.
+
+#### 🧩 Conversation Encoder
+```json
+"conversation_encoder": {
+    "type": "lstm",
+    "bidirectional": false,
+    "hidden_size": 200,
+    "input_size": 200
+}
+```
+- Takes encoded messages and runs them through an LSTM to understand the **flow of conversation**.
+- Not bidirectional—likely assumes messages are in temporal order.
+
+#### 🎚️ Additional Settings
+```json
+"dropout": "0.3",         // Prevent overfitting
+"pos_weight": "10",       // Handles class imbalance (e.g., lies are rare)
+"use_game_scores": true   // Game dynamics are used as extra features
+```
+
+---
+
+### 📁 Data Paths
+```json
+"train_data_path": "data/train.jsonl",
+"validation_data_path": "data/validation.jsonl",
+"test_data_path": "data/test.jsonl",
+```
+- Specifies locations of training, validation, and test data in JSON Lines format.
+
+---
+
+### 🏋️‍♂️ Trainer
+```json
+"trainer": {
+    "cuda_device": 0,
+    "grad_clipping": 1,
+    "num_epochs": 15,
+    "optimizer": {
+        "type": "adam",
+        "lr": "0.003"
+    },
+    "patience": 10,
+    "validation_metric": "+macro_fscore"
+}
+```
+- Training uses **GPU 0**.
+- **Gradient clipping** at 1 to prevent exploding gradients.
+- **Adam optimizer**, 15 epochs, learning rate 0.003.
+- Early stopping if **no improvement in 10 epochs** based on **macro F1 score**.
+- F1 score is a good choice for imbalanced classes (like lies vs. truth).
+
+---
+
+### ✅ Evaluation
+```json
+"evaluate_on_test": true
+```
+- After training, the model will be evaluated on the test set automatically.
+
+---
+
+## 🤔 What does "actual_lie" mean?
+
+- The term likely refers to the **actual ground truth** about whether a message was a **lie** or **truth** in the context of Diplomacy, a strategy game involving secret alliances and deception.
+- The model is likely trained to **predict deception**, possibly based on context, past messages, and game state.
+
+---
+
+## 📌 Summary
+
+This config trains a **context-aware deception detection model** using a hierarchical LSTM that reads **game messages** and tries to detect lies using message history, speaker info, and game stats. It uses pretrained embeddings, custom readers, and is tuned for imbalanced classification.
+
+Let me know if you want help visualizing the architecture or understanding the data format!
+=================================================================SUSPECTED LIE================================================
+
+Great question! The file you've posted — `configs/suspected_lie/contextlstm+power.jsonnet` — is nearly identical to the earlier `actual_lie` config, **but there's one key difference**:
+
+---
+
+### 🔑 The Crucial Difference:  
+```json
+"label_key": "receiver_labels"   // (suspected_lie)
+vs.
+"label_key": "sender_labels"     // (actual_lie)
+```
+
+---
+
+## ✅ So, What is a *"Suspected Lie"*?
+
+### 🧠 Definition in Context:
+- In the **"suspected_lie"** configuration, the model is **not** trying to detect whether a message **actually was a lie**.
+- Instead, it’s learning to predict **whether the receiver of the message thought it was a lie**.
+
+---
+
+## 📘 Analogy:
+
+Imagine a conversation between two players in the **game Diplomacy**:
+- Player A sends a message like:  
+  🗣️ *"I will support your army in Paris next turn."*
+- That message is recorded in the dataset.
+
+Now, there are **two kinds of labels**:
+1. `sender_labels`: Truth or lie **according to the game outcome** (Did Player A actually support the army?).
+2. `receiver_labels`: Whether **Player B believed the message was a lie** (even if it wasn't).
+
+---
+
+## 🔍 Code-Level Differences
+
+### 1. **Label Key Difference**
+```json
+"label_key": "receiver_labels"
+```
+- The dataset will provide a binary label indicating **whether the receiver suspected the sender was lying**.
+
+### 2. Everything Else (Model Architecture, Optimizer, etc.)
+- **Same as `actual_lie` config**, except:
+  ```json
+  "dropout": "0.4"
+  ```
+  - Slightly higher dropout in this version, probably to account for potential noisiness or subjectivity in suspicion data.
+
+---
+
+## 🤖 What the Model is Learning
+
+### `actual_lie` model:
+- Predicts **ground-truth lies** using sender labels.
+- Objective: *"Did the speaker lie?"*
+
+### `suspected_lie` model:
+- Predicts **perceived lies** using receiver labels.
+- Objective: *"Did the receiver **suspect** the speaker was lying?"*
+
+---
+
+## 🎯 Summary Table
+
+| Aspect              | `actual_lie`                                 | `suspected_lie`                              |
+|---------------------|-----------------------------------------------|----------------------------------------------|
+| `label_key`         | `sender_labels`                               | `receiver_labels`                            |
+| Target              | Whether message **was truly a lie**           | Whether receiver **suspected a lie**         |
+| Truth based on      | Objective game outcome                        | Subjective player belief                     |
+| Dropout             | 0.3                                           | 0.4                                          |
+| Use of game scores  | ✅                                            | ✅                                           |
+| Architecture        | Hierarchical LSTM                             | Same                                          |
+
+---
+
+Let me know if you’d like a visual comparison of the two models or want to see example input/output!
