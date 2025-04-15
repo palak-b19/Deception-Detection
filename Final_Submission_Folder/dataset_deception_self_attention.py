@@ -68,6 +68,41 @@ random.seed(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark=False
 
+'''
+The model uses an EnhancedDeceptionDetector neural network architecture that combines:
+
+NLP processing - The code leverages pre-trained sentence embeddings from SentenceTransformer to understand the semantic content of messages
+Linguistic feature extraction - It extracts 6 meaningful linguistic features from messages:
+
+Word count (log-transformed)
+Lexical diversity (unique words / total words)
+Self-references (count of "I", "me", "my", etc.)
+Group references (count of "we", "us", "our", etc.)
+Negative emotional content (using VADER sentiment analysis)
+Use of modifiers (adjectives and adverbs)
+'''
+
+'''
+Data Processing Pipeline
+The code includes a comprehensive data preprocessing pipeline that:
+
+Loads and processes jsonl files containing conversation data
+Creates mappings for categorical features (countries, seasons, years)
+Extracts linguistic features from messages using spaCy and NLTK
+Normalizes features based on training data statistics
+Handles empty messages and missing annotations
+Implements oversampling of deceptive conversations to address class imbalance
+'''
+
+'''
+Technical Details
+
+The code uses PyTorch for the deep learning implementation
+It leverages GPU acceleration when available
+It includes a checkpoint management system for resuming training
+The evaluation code can verify that a loaded checkpoint produces the expected metrics
+'''
+
 # Model Definition
 class EnhancedDeceptionDetector(nn.Module):
     def __init__(self, num_countries, num_seasons, num_years,
@@ -110,6 +145,8 @@ class EnhancedDeceptionDetector(nn.Module):
         else:
             ling_features_padded = torch.zeros(batch_size, message_embs_padded.size(1), 0, device=device)
 
+                    
+
         senders_emb = self.country_embedding(senders)
         receivers_emb = self.country_embedding(receivers)
         seasons_emb = self.season_embedding(seasons)
@@ -136,6 +173,9 @@ class EnhancedDeceptionDetector(nn.Module):
         final_pred = self.classifier(context).unsqueeze(1)
         return final_pred.expand(-1, lstm_out.size(1), -1)
 
+'''
+Contextual information: The inclusion of sender/receiver country information, game scores, and temporal context (seasons/years) recognizes that deception patterns may vary based on these factors
+'''
 # Data Preprocessing
 def preprocess_data(data_file, country_map=None, season_map=None, year_map=None, use_ling_features=True, ling_stats=None):
     logger.info(f"Preprocessing {data_file}")
