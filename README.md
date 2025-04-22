@@ -15,7 +15,7 @@ References the 2020 ACL Diplomacy dataset, split into:
 - `train.jsonl` (9 games)
 - `validation.jsonl` (1 game)
 - `test.jsonl` (2 games)
-- Dataset: [2020 ACL Diplomacy GitHub Repository](https://github.com/palak-b19/Deception-Detection)
+- Dataset: [2020 ACL Diplomacy GitHub Repository]([https://github.com/DenisPeskoff/2020_acl_diplomacy/tree/master/data])
 
 ## Required Libraries
 - PyTorch
