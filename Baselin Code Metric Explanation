@@ -1,0 +1,309 @@
+Metrics Printed Across the Code Files
+1. bagofwords.py and harbringers.py
+Printed Metrics: Precision, Recall, F1-score (per class), Accuracy, Macro F1, Weighted F1
+Code Evidence: Both files use print(classification_report(test[1], predictions, digits=3)) in the log_reg function. The classification_report from scikit-learn outputs a table with:
+Precision, recall, and F1-score for each class (e.g., 0 and 1, corresponding to 'not lie' and 'lie').
+Support (number of samples per class).
+Accuracy (overall).
+Macro average (unweighted mean across classes) for precision, recall, and F1-score.
+Weighted average (weighted by support) for precision, recall, and F1-score.
+Task Context: The TASK variable toggles between "SENDER" and "RECEIVER", indicating separate evaluations, though the printed metrics remain the same format.
+Label Mapping: In convert_to_binary, if message[annotation] == False, label is 0; if True, label is 1. Assuming True means 'lie' (consistent with lie detection focus), then 1 is 'lie' and 0 is 'not lie'.
+2. hlstm.py
+Printed Metrics: F1-score (per class), Micro F1, Macro F1 (plus precision and recall per class)
+Code Evidence: This file defines a HierarchicalLSTM model using AllenNLP. The __init__ method sets up:
+self._f1 = FBetaMeasure(average=None, labels=index_list): F1 per class.
+self._f1_micro = FBetaMeasure(average='micro'): Micro F1.
+self._f1_macro = FBetaMeasure(average='macro'): Macro F1.
+The get_metrics method returns a dictionary with F1 scores for each label (e.g., 'True' and 'False'), micro F1, and macro F1, including precision and recall components. While no explicit print statement exists here, AllenNLP’s training/evaluation pipeline typically prints these metrics.
+Label Mapping: Labels are from the vocabulary (e.g., 'True' and 'False'), but mapping isn’t explicitly printed beyond self._label_index_to_token. Context suggests 'False' might be 'lie' (statement is false), but standard practice and paper focus imply 1 is 'lie'.
+3. human_baseline.py
+Printed Metrics: Macro F1, Lie F1 (binary F1 for 'lie' class), Accuracy
+Code Evidence:
+print('Human baseline, macro:', f1_score(sender_labels, receiver_labels, pos_label=1, average='macro')): Macro F1.
+print('Human baseline, lie F1:', f1_score(sender_labels, receiver_labels, pos_label=1, average='binary')): Binary F1 for class 1.
+print('Overall Accuracy is, ', accuracy_score(sender_labels, receiver_labels)): Accuracy.
+Label Mapping: Here, sender_labels assigns 0 if sender_annotation == True (lie) and 1 if False (not lie). However, pos_label=1 with "lie F1" suggests a possible error: class 1 is 'not lie', yet labeled as 'lie F1'. Assuming a typo, it likely intends pos_label=0 for 'lie', but as coded, it prints F1 for 'not lie' mislabeled as 'lie F1'.
+Context: Compares sender annotations (truth) to receiver annotations (predictions), establishing a human performance baseline.
+4. lie_detector.py
+Printed Metrics: F1-score (for 'lie' and 'truth'), Micro F1, Macro F1, Precision and Recall (for 'lie' and 'truth')
+Code Evidence: The LieDetector model defines:
+self.f1_lie = F1Measure(vocab.get_token_index('False', 'labels')): F1 for 'lie'.
+self.f1_truth = F1Measure(vocab.get_token_index('True', 'labels')): F1 for 'truth'.
+self.micro_f1 = FBetaMeasure(average='micro'): Micro F1.
+self.macro_f1 = FBetaMeasure(average='macro'): Macro F1.
+get_metrics returns a dictionary with precision, recall, and F1 for 'truth' and 'lie', plus micro and macro F1 scores. These are printed via AllenNLP’s framework.
+Label Mapping: 'False' is 'lie', 'True' is 'truth', with 'False' likely mapped to 1 (positive class) given posclass_weight.
+5. random_and_majority_baselines.py
+Printed Metrics: Macro F1, Binary F1 (for 'lie' class)
+Code Evidence:
+print(metric): Indicates 'macro' or 'binary'.
+print('Sender Random F1', sum(sender_f1s)/repeats): Random baseline F1 for sender.
+print('Receiver Random F1', sum(receiver_f1s)/repeats): Random baseline F1 for receiver.
+print('Sender Majority Class F1', sum(sender_majority_f1s)/repeats): Majority baseline F1 for sender.
+print('Receiver Majority Class F1', sum(receiver_majority_f1s)/repeats): Majority baseline F1 for receiver.
+Computed via f1_score(..., pos_label=1, average=metric) for both macro and binary settings.
+Label Mapping: sender_labels assigns 0 for True (lie) and 1 for False (not lie), so pos_label=1 is 'not lie', but context implies binary F1 targets 'lie', suggesting possible misalignment corrected in interpretation.
+6. pooled_rnn.py and __init__.py
+Printed Metrics: None
+Reason: pooled_rnn.py defines an encoder without metrics or print statements. __init__.py is empty, typical for module initialization.
+Detailed Explanation of Each Metric
+Below, I define each metric requested (F1 score, lieF1, macro F1, micro F1) and others printed, with formulas and explanations grounded in the code and paper’s lie detection focus.
+
+F1 Score (Per Class)
+Description: The F1 score is the harmonic mean of precision and recall for a specific class, balancing the trade-off between false positives and false negatives. In this context, it’s computed for 'lie' and 'not lie' (or 'truth').
+Printed In: bagofwords.py, harbringers.py (via classification_report), hlstm.py, lie_detector.py (via get_metrics), implicitly in baselines.
+Formula:
+𝐹
+1
+=
+2
+×
+precision
+×
+recall
+precision
++
+recall
+F1=2× 
+precision+recall
+precision×recall
+​
+ 
+Precision: 
+𝑇
+𝑃
+𝑇
+𝑃
++
+𝐹
+𝑃
+TP+FP
+TP
+​
+ , where TP is true positives, FP is false positives.
+Recall: 
+𝑇
+𝑃
+𝑇
+𝑃
++
+𝐹
+𝑁
+TP+FN
+TP
+​
+ , where FN is false negatives.
+Example: For the 'lie' class (assume label 1):
+TP: Correctly predicted lies.
+FP: 'Not lie' predicted as 'lie'.
+FN: 'Lie' predicted as 'not lie'.
+Paper Context: Critical for assessing lie detection accuracy per class, given the imbalance (more truthful statements).
+LieF1 (F1 Score for the 'Lie' Class)
+Description: Specifically the F1 score for the 'lie' class, emphasizing the model’s ability to detect deception, a primary focus of the paper.
+Printed In:
+human_baseline.py: As 'lie F1', though possibly mislabeled (intended for class 0, printed for 1).
+lie_detector.py: As 'lie_fscore' (for 'False').
+hlstm.py: As F1 for the 'lie' label (e.g., 'False_1_fscore').
+random_and_majority_baselines.py: Binary F1, interpreted as 'lie F1' (though computed for class 1, likely intended for 'lie').
+bagofwords.py, harbringers.py: Included in classification_report for the 'lie' class (label 1).
+Formula: Same as above, applied to the 'lie' class (e.g., label 1 or 'False'):
+lieF1
+=
+2
+×
+lie_precision
+×
+lie_recall
+lie_precision
++
+lie_recall
+lieF1=2× 
+lie_precision+lie_recall
+lie_precision×lie_recall
+​
+ 
+Label Consideration: Inconsistencies exist (e.g., 0 vs. 1 for 'lie'), but paper’s focus on lie detection suggests 'lie' is the positive class (often 1), except where inverted (e.g., human baseline).
+Paper Context: Highlighted to evaluate how well models identify lies, a key performance indicator.
+Macro F1
+Description: The unweighted average of F1 scores across all classes, treating 'lie' and 'not lie' equally despite class imbalance.
+Printed In:
+bagofwords.py, harbringers.py: In classification_report as 'macro avg'.
+hlstm.py: As 'macro_fscore'.
+lie_detector.py: As 'macro_fscore'.
+human_baseline.py: As 'Human baseline, macro'.
+random_and_majority_baselines.py: When metric = 'macro'.
+Formula:
+macro F1
+=
+𝐹
+1
+lie
++
+𝐹
+1
+not lie
+2
+macro F1= 
+2
+F1 
+lie
+​
+ +F1 
+not lie
+​
+ 
+​
+ 
+Explanation: Provides a balanced view, less skewed by the majority class ('not lie'), aligning with the paper’s need to assess performance across both outcomes.
+Paper Context: Useful for comparing models fairly, especially given class imbalance noted in the code (e.g., class_weight='balanced').
+Micro F1
+Description: Aggregates TP, FP, and FN across all classes to compute a global F1 score, equivalent to accuracy in binary classification due to equal weighting of instances.
+Printed In:
+hlstm.py: As 'micro_fscore'.
+lie_detector.py: As 'micro_fscore'.
+Implicitly in bagofwords.py, harbringers.py: Accuracy in classification_report equals micro F1 in binary settings.
+Formula:
+micro F1
+=
+2
+×
+micro_precision
+×
+micro_recall
+micro_precision
++
+micro_recall
+micro F1=2× 
+micro_precision+micro_recall
+micro_precision×micro_recall
+​
+ 
+Micro Precision: 
+∑
+𝑇
+𝑃
+∑
+(
+𝑇
+𝑃
++
+𝐹
+𝑃
+)
+∑(TP+FP)
+∑TP
+​
+ .
+Micro Recall: 
+∑
+𝑇
+𝑃
+∑
+(
+𝑇
+𝑃
++
+𝐹
+𝑁
+)
+∑(TP+FN)
+∑TP
+​
+ .
+In binary classification: 
+𝑇
+𝑃
++
+𝑇
+𝑁
+𝑇
+𝑃
++
+𝑇
+𝑁
++
+𝐹
+𝑃
++
+𝐹
+𝑁
+=
+accuracy
+TP+TN+FP+FN
+TP+TN
+​
+ =accuracy.
+Explanation: Reflects overall performance, heavily influenced by the majority class unless balanced (e.g., via weights in models).
+Paper Context: Offers a holistic metric, complementing class-specific measures.
+Other Relevant Metrics
+Precision and Recall (Per Class):
+Printed In: bagofwords.py, harbringers.py (via classification_report), hlstm.py, lie_detector.py (via get_metrics).
+Formula:
+Precision: 
+𝑇
+𝑃
+𝑇
+𝑃
++
+𝐹
+𝑃
+TP+FP
+TP
+​
+ .
+Recall: 
+𝑇
+𝑃
+𝑇
+𝑃
++
+𝐹
+𝑁
+TP+FN
+TP
+​
+ .
+Role: Components of F1, providing insight into false positives (precision) and missed lies (recall).
+Accuracy:
+Printed In: bagofwords.py, harbringers.py (via classification_report), human_baseline.py.
+Formula: 
+𝑇
+𝑃
++
+𝑇
+𝑁
+𝑇
+𝑃
++
+𝑇
+𝑁
++
+𝐹
+𝑃
++
+𝐹
+𝑁
+TP+TN+FP+FN
+TP+TN
+​
+ .
+Role: Overall correctness, though less informative given class imbalance unless paired with F1 metrics.
+Summary of Printed Metrics
+F1 Score: Yes, printed per class in bagofwords.py, harbringers.py, hlstm.py, lie_detector.py.
+LieF1: Yes, explicitly as 'lie F1' or 'lie_fscore' in human_baseline.py, lie_detector.py, hlstm.py; implicitly in bagofwords.py, harbringers.py, and baselines for the 'lie' class.
+Macro F1: Yes, in all models except pooled_rnn.py and __init__.py.
+Micro F1: Yes, in hlstm.py, lie_detector.py; as accuracy in bagofwords.py, harbringers.py.
+Others: Precision, recall (per class), accuracy.
+Contextual Notes from the Paper
+The paper’s title and code suggest a focus on sender and receiver perspectives, with metrics often separated (e.g., TASK in bagofwords.py, sender/receiver F1 in baselines). Class imbalance is addressed (e.g., class_weight='balanced', pos_weight in hlstm.py), emphasizing lie detection (positive class), which aligns with lieF1’s prominence. Without the full paper, I infer that results tables likely report these metrics, prioritizing F1-based measures over accuracy due to imbalance, consistent with NLP practices.
+
+Conclusion
+The code prints a comprehensive set of evaluation metrics tailored to lie detection:
+
+F1 Score (per class) for detailed class performance.
+LieF1 to spotlight lie detection efficacy.
+Macro F1 for balanced assessment across classes.
+Micro F1 (or accuracy) for overall performance.
+Precision and Recall as supporting metrics, with Accuracy in simpler models/baselines.
+These metrics, computed as detailed above, reflect the paper’s goal of evaluating lie detection models in Diplomacy, balancing overall accuracy with class-specific effectiveness, particularly for the critical 'lie' class.
