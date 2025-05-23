@@ -1,6 +1,7 @@
 # Deception Detection: Lie Detection in Diplomacy via Machine Learning
 
 ## Project Overview
+This Project was done as a part of the course project for the course Natural Language Processing ( CSE556 ).
 This project focuses on detecting deception in diplomatic communication within the game of Diplomacy using machine learning and deep learning techniques. The research is done on the "It Takes Two to Lie: One to Lie, and One to Listen" dataset (Peskov et al., 2020) to analyze 17,289 annotated messages from 12 Diplomacy games, with approximately 5% labeled as deceptive.
 
 ## Codes
