@@ -8,7 +8,7 @@ import backoff
 from requests.exceptions import HTTPError
 
 # Set Groq API key (use Kaggle Secrets or environment variable)
-os.environ["GROQ_API_KEY"] = "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"  # Replace with your key
+os.environ["GROQ_API_KEY"] = ""  # Replace with your key
 
 # Initialize OpenAI client
 client = OpenAI(
